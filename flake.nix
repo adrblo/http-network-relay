@@ -21,8 +21,6 @@
         default = mkPoetryApplication {
           name = "http-network-relay";
           projectDir = ./.;
-          preferWheels = true;
-          groups = [ ];
           python = pkgs.python312;
         };
       }

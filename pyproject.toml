@@ -4,6 +4,9 @@ version = "0.1.0"
 description = ""
 authors = ["Eli Kogan-Wang <elikowa@gmail.com>", "Adrian Block <adrian@thymis.io>"]
 readme = "README.md"
+packages = [
+    { include = "http_network_relay" }
+]
 
 [tool.poetry.dependencies]
 python = "^3.11"
