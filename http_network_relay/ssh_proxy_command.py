@@ -2,8 +2,8 @@ import asyncio
 from websockets.asyncio.client import connect
 import argparse
 import os
-from pydantic_models import SSHProxyCommandToServerMessage, StartPtSMessage
-
+from .pydantic_models import SSHProxyCommandToServerMessage, StartPtSMessage
+import websockets
 # take 4 arguments: target_host_identifier, server_ip, server_port, protocol
 
 parser = argparse.ArgumentParser(description="Connect to a server via a proxy command")
@@ -16,7 +16,7 @@ parser.add_argument("protocol", help="The protocol to use (e.g. 'udp' or 'tcp')"
 parser.add_argument(
     "--server_url",
     help="The server URL",
-    default=os.getenv("HTTP_NETWORK_RELAY_SERVER_URL"),
+    default=os.getenv("HTTP_NETWORK_RELAY_SERVER_URL", "ws://127.0.0.1:8000/ws_for_ssh_proxy_command"),
 )
 
 
@@ -37,7 +37,11 @@ async def async_main():
         await websocket.send(start_message.model_dump_json())
         print(f"Sent start message: {start_message}")
         while True:
-            message = await websocket.recv()
+            try:
+                message = await websocket.recv()
+            except websockets.exceptions.ConnectionClosedError:
+                print("Connection closed")
+                break
             print(f"Received message: {message}")
 
 
