@@ -1,6 +1,8 @@
 # HTTP Network Relay over WebSockets
 
-<video src="https://github.com/user-attachments/assets/7ddd48a1-e5d8-4b76-9efc-499b9e63cdad" />
+|<video src="https://github.com/user-attachments/assets/7ddd48a1-e5d8-4b76-9efc-499b9e63cdad" />|
+|-|
+|Server, client and SSH proxy command in action|
 
 Three binaries: `server`, `client`, and `ssh-proxy-command`.
 
