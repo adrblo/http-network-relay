@@ -2,7 +2,7 @@
 from typing import Union
 
 from fastapi import FastAPI, WebSocket
-from .pydantic_models import ClientToServerMessage, ServerToClientMessage, SSHProxyCommandToServerMessage, ServerToSSHProxyCommandMessage
+from pydantic_models import ClientToServerMessage, ServerToClientMessage, SSHProxyCommandToServerMessage, ServerToSSHProxyCommandMessage
 
 app = FastAPI()
 
