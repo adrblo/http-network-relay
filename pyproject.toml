@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "http-network-relay"
+version = "0.1.0"
+description = ""
+authors = ["Eli Kogan-Wang <elikowa@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = {extras = ["standard"], version = "^0.115.5"}
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
