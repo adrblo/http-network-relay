@@ -6,7 +6,8 @@ import argparse
 import os
 import uuid
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+
 from .pydantic_models import (
     ClientToServerMessage,
     CtSConnectionResetMessage,
@@ -26,6 +27,7 @@ from .pydantic_models import (
     StPTCPDataMessage,
 )
 import sys
+import json
 
 app = FastAPI()
 
@@ -40,32 +42,70 @@ if os.getenv("DEBUG") == "1":
     debug = True
 
 
-def eprint(*args, **kwargs):
-    if debug:
+def eprint(*args, only_debug=False, **kwargs):
+    if (debug and only_debug) or (not only_debug):
         print(*args, file=sys.stderr, **kwargs)
+
+
+CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
+
+with open(CREDENTIALS_FILE) as f:
+    credentials = json.load(f)
 
 
 @app.websocket("/ws_for_clients")
 async def websocket_for_clients(websocket: WebSocket):
     await websocket.accept()
     client_connections.append(websocket)
+    start_message_json_data = await websocket.receive_text()
+    start_message = ClientToServerMessage.model_validate_json(
+        start_message_json_data
+    ).inner
+    eprint(f"Message received from client: {start_message}")
+    if not isinstance(start_message, CtSStartMessage):
+        eprint(f"Unknown message received from client: {start_message}")
+        return
+    #  check if we know the client
+    if start_message.client_name not in credentials["clients"]:
+        eprint(f"Unknown client: {start_message.client_name}")
+        # close the connection
+        await websocket.close()
+        return
+
+    # check if the secret is correct
+    if credentials["clients"][start_message.client_name] != start_message.client_secret:
+        eprint(f"Invalid secret for client: {start_message.client_name}")
+        # close the connection
+        await websocket.close()
+        return
+
+    # check if the client is already registered
+    if start_message.client_name in registered_client_connections:
+        eprint(f"Client already registered: {start_message.client_name}")
+        # close the connection
+        await websocket.close()
+        return
+
+    registered_client_connections[start_message.client_name] = websocket
+    eprint(f"Registered client connection: {start_message.client_name}")
+
     while True:
-        json_data = await websocket.receive_text()
+        try:
+            json_data = await websocket.receive_text()
+        except WebSocketDisconnect:
+            eprint(f"Client disconnected: {start_message.client_name}")
+            del registered_client_connections[start_message.client_name]
+            break
         message = ClientToServerMessage.model_validate_json(json_data)
-        eprint(f"Message received from client: {message}")
-        if isinstance(message.inner, CtSStartMessage):
-            eprint(f"Received start message from client: {message}")
-            start_message = message.inner
-            registered_client_connections[start_message.client_name] = websocket
-            eprint(f"Registered client connection: {start_message.client_name}")
-        elif isinstance(message.inner, CtSInitiateConnectionErrorMessage):
+        eprint(f"Message received from client: {message}", only_debug=True)
+        if isinstance(message.inner, CtSInitiateConnectionErrorMessage):
             eprint(f"Received initiate connection error message from client: {message}")
             await initiate_connection_answer_queue.put(message.inner)
         elif isinstance(message.inner, CtSInitiateConnectionOKMessage):
             eprint(f"Received initiate connection OK message from client: {message}")
             await initiate_connection_answer_queue.put(message.inner)
         elif isinstance(message.inner, CtSTCPDataMessage):
-            eprint(f"Received TCP data message from client: {message}")
+            eprint(f"Received TCP data message from client: {message}", only_debug=True)
             tcp_data_message = message.inner
             if tcp_data_message.connection_id not in active_connections:
                 eprint(f"Unknown connection_id: {tcp_data_message.connection_id}")
@@ -116,6 +156,15 @@ async def websocket_for_ssh_proxy_command(websocket: WebSocket):
         eprint(f"Unknown message received from SSH proxy command: {message}")
         return
     start_message = message.inner
+    # check if credentials are correct
+    if start_message.secret_key not in credentials["proxy_users"]:
+        eprint(f"Invalid secret key: {start_message.secret_key}")
+        # send a message back and kill the connection
+        await websocket.send_text(
+            ServerToSSHProxyCommandMessage(
+                inner=StPErrorMessage(message="Invalid secret key")
+            ).model_dump_json()
+        )
     # check if the client is registered
     if not start_message.connection_target in registered_client_connections:
         eprint(f"Client not registered: {start_message.connection_target}")
@@ -193,13 +242,17 @@ async def start_connection(
         ServerToSSHProxyCommandMessage(inner=StPStartOKMessage()).model_dump_json()
     )
 
-    # todo: start listener for client messages somehow here
-
     while True:
-        json_data = await proxy_command_connection.receive_text()
+        try:
+            json_data = await proxy_command_connection.receive_text()
+        except WebSocketDisconnect:
+            eprint(f"SSH proxy command disconnected: {connection_id}")
+            if connection_id in active_connections:
+                del active_connections[connection_id]
+            break
         message = SSHProxyCommandToServerMessage.model_validate_json(json_data)
         if isinstance(message.inner, PtSTCPDataMessage):
-            eprint(f"Received TCP data message from SSH proxy command: {message}")
+            eprint(f"Received TCP data message from SSH proxy command: {message}", only_debug=True)
             await client_connection.send_text(
                 ServerToClientMessage(
                     inner=StCTCPDataMessage(
@@ -222,7 +275,7 @@ parser.add_argument(
     "--port",
     help="The port to bind to",
     type=int,
-    default=os.getenv("HTTP_NETWORK_RELAY_SERVER_PORT", 8000),
+    default=int(os.getenv("HTTP_NETWORK_RELAY_SERVER_PORT", "8000")),
 )
 
 

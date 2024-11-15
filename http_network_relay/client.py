@@ -3,6 +3,7 @@ import base64
 from websockets.asyncio.client import connect
 import argparse
 import os
+
 from .pydantic_models import (
     ClientToServerMessage,
     CtSConnectionResetMessage,
@@ -18,14 +19,15 @@ import websockets
 import random
 from websockets.asyncio.client import ClientConnection
 import sys
+import time
 
 # take 4 arguments: target_host_identifier, server_ip, server_port, protocol
 debug = False
 if os.getenv("DEBUG") == "1":
     debug = True
 
-def eprint(*args, **kwargs):
-    if debug:
+def eprint(*args, only_debug=False, **kwargs):
+    if (debug and only_debug) or (not only_debug):
         print(*args, file=sys.stderr, **kwargs)
 
 parser = argparse.ArgumentParser(description="Client for the HTTP network relay")
@@ -43,6 +45,11 @@ parser.add_argument(
         "HTTP_NETWORK_RELAY_CLIENT_NAME", f"client-{random.randbytes(4).hex()}"
     ),
 )
+parser.add_argument(
+    "--client-secret",
+    help="The client secret",
+    default=os.getenv("HTTP_NETWORK_RELAY_CLIENT_SECRET", None),
+)
 
 active_connections = {} # connection_id -> (tcp_reader, tcp_writer)
 
@@ -51,21 +58,50 @@ async def async_main():
     args = parser.parse_args()
     if args.server_url is None:
         raise ValueError("server_url is required")
+    if args.client_secret is None:
+        raise ValueError("client_secret is required")
+    
+    connection_delay = 1
+    last_connection_attempt_time = 0
+    while True:
+        eprint("Connecting to server...")
+        # exponential backoff
+        try:
+            await connect_to_server(args)
+        except ConnectionRefusedError as e:
+            eprint(f"Connection refused: {e}")
+        except Exception as e:
+            eprint(f"Error: {e}")
+        if time.time() - last_connection_attempt_time >= 60:
+            # if it's been more than 60 seconds since the last connection attempt
+            # then the connection has been stable
+            # and we can reset the connection delay
+            connection_delay = 1
+        eprint(f"Connection closed, reconnecting in {connection_delay} seconds")
+        time.sleep(connection_delay)
+        connection_delay = min(2 * connection_delay, 60)
+        last_connection_attempt_time = time.time()
 
+async def connect_to_server(args):
     async with connect(args.server_url) as websocket:
         start_message = ClientToServerMessage(
-            inner=CtSStartMessage(client_name=args.client_name)
+            inner=CtSStartMessage(client_name=args.client_name, client_secret=args.client_secret)
         )
         await websocket.send(start_message.model_dump_json())
         eprint(f"Sent start message: {start_message}")
+        
+
         while True:
             try:
                 json_data = await websocket.recv()
-            except websockets.exceptions.ConnectionClosedError:
-                eprint("Connection closed")
+            except websockets.exceptions.ConnectionClosedError as e:
+                eprint(f"Connection closed with error: {e}")
+                break
+            except websockets.exceptions.ConnectionClosedOK as e:
+                eprint(f"Connection closed OK: {e}")
                 break
             message = ServerToClientMessage.model_validate_json(json_data)
-            eprint(f"Received message: {message}")
+            eprint(f"Received message: {message}", only_debug=True)
             if isinstance(message.inner, StCInitiateConnectionMessage):
                 eprint(f"Received initiate connection message: {message}")
                 try:
@@ -80,7 +116,7 @@ async def async_main():
                     )
             elif isinstance(message.inner, StCTCPDataMessage):
                 tcp_data_message = message.inner
-                eprint(f"Received TCP data message: {tcp_data_message}")
+                eprint(f"Received TCP data message: {tcp_data_message}", only_debug=True)
                 # associate the connection_id with the websocket
                 if tcp_data_message.connection_id not in active_connections:
                     eprint(f"Unknown connection_id: {tcp_data_message.connection_id}")

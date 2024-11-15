@@ -15,6 +15,7 @@ class ClientToServerMessage(BaseModel):
 class CtSStartMessage(BaseModel):
     kind: Literal["start"] = "start"
     client_name: str
+    client_secret: str
 
 
 class CtSInitiateConnectionErrorMessage(BaseModel):
@@ -33,10 +34,12 @@ class CtSTCPDataMessage(BaseModel):
     connection_id: str
     data_base64: str
 
+
 class CtSConnectionResetMessage(BaseModel):
     kind: Literal["connection_reset"] = "connection_reset"
     message: str
     connection_id: str
+
 class ServerToClientMessage(BaseModel):
     inner: Union["StCInitiateConnectionMessage", "StCTCPDataMessage"] = Field(
         discriminator="kind"
@@ -70,6 +73,7 @@ class PtSStartMessage(BaseModel):
     target_ip: str
     target_port: int
     protocol: str
+    secret_key: str
 
 
 class PtSTCPDataMessage(BaseModel):
