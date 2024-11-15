@@ -2,7 +2,7 @@
 name = "http-network-relay"
 version = "0.1.0"
 description = ""
-authors = ["Eli Kogan-Wang <elikowa@gmail.com>"]
+authors = ["Eli Kogan-Wang <elikowa@gmail.com>", "Adrian Block <adrian@thymis.io>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
@@ -14,3 +14,8 @@ pydantic = "^2.9.2"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+client = 'http_network_relay.client:main'
+server = 'http_network_relay.server:main'
+ssh-proxy-command = 'http_network_relay.ssh_proxy_command:main'
