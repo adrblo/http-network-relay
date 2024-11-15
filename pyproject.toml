@@ -9,6 +9,8 @@ readme = "README.md"
 python = "^3.11"
 fastapi = {extras = ["standard"], version = "^0.115.5"}
 pydantic = "^2.9.2"
+websockets = "^14.1"
+
 
 
 [build-system]

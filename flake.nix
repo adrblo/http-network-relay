@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/release-24.05";
     poetry2nix = {
       url = "github:nix-community/poetry2nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -9,7 +9,7 @@
 
   outputs = { self, nixpkgs, poetry2nix, ... }:
   let
-    eachSystem = nixpkgs.lib.genAttrs ["x86-64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
+    eachSystem = nixpkgs.lib.genAttrs ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
   in
   {
     packages = eachSystem (system:

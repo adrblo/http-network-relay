@@ -2,7 +2,7 @@
 from typing import Union
 
 from fastapi import FastAPI, WebSocket
-from http_network_relay.pydantic_models import ClientToServerMessage, ServerToClientMessage, SSHProxyCommandToServerMessage, ServerToSSHProxyCommandMessage
+from .pydantic_models import ClientToServerMessage, ServerToClientMessage, SSHProxyCommandToServerMessage, ServerToSSHProxyCommandMessage
 
 app = FastAPI()
 
@@ -27,3 +27,6 @@ async def websocket_for_ssh_proxy_command(websocket: WebSocket):
         message = SSHProxyCommandToServerMessage.model_validate_json(json_data)
         print(f"Message received from SSH proxy command: {message}")
 
+
+def main():
+    pass
