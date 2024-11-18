@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import sys
@@ -29,7 +30,19 @@ from .pydantic_models import (
     RtETCPDataMessage,
 )
 
-app = FastAPI()
+CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
+CREDENTIALS = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    with open(CREDENTIALS_FILE, "r") as f:
+        global CREDENTIALS
+        CREDENTIALS = json.load(f)
+
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 agent_connections = []
 registered_agent_connections = {}  # name -> connection
@@ -47,8 +60,7 @@ def eprint(*args, only_debug=False, **kwargs):
         print(*args, file=sys.stderr, **kwargs)
 
 
-CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
-CREDENTIALS = None
+
 
 @app.websocket("/ws_for_edge_agents")
 async def ws_for_edge_agents(websocket: WebSocket):
@@ -284,9 +296,8 @@ parser.add_argument(
 
 def main():
     args = parser.parse_args()
-    with open(args.credentials_file) as f:
-        global CREDENTIALS
-        CREDENTIALS = json.load(f)
+    global CREDENTIALS_FILE
+    CREDENTIALS_FILE = args.credentials_file
 
     uvicorn.run(
         "http_network_relay.network_relay:app",
@@ -297,6 +308,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-else:
-    with open(CREDENTIALS_FILE) as f:
-        CREDENTIALS = json.load(f)
