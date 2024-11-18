@@ -15,11 +15,14 @@ pydantic = "^2.9.2"
 websockets = "^14.1"
 uvicorn = "^0.32.0"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-client = 'http_network_relay.client:main'
-server = 'http_network_relay.server:main'
-ssh-proxy-command = 'http_network_relay.ssh_proxy_command:main'
+edge-agent = 'http_network_relay.edge_agent:main'
+network-relay = 'http_network_relay.network_relay:main'
+access-client = 'http_network_relay.access_client:main'

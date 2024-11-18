@@ -1,40 +1,45 @@
-import asyncio
-from websockets.asyncio.client import connect
 import argparse
+import asyncio
+
+import base64
 import os
-from .pydantic_models import (
-    PtSTCPDataMessage,
-    SSHProxyCommandToServerMessage,
-    PtSStartMessage,
-    ServerToSSHProxyCommandMessage,
-    StPErrorMessage,
-    StPStartOKMessage,
-    StPTCPDataMessage,
-)
-import websockets
 import sys
 
-# take 4 arguments: target_host_identifier, server_ip, server_port, protocol
-import base64
+import websockets
+from websockets.asyncio.client import connect
 
-parser = argparse.ArgumentParser(description="Connect to a server via a proxy command")
+from .pydantic_models import (
+    AccessClientToRelayMessage,
+    AtRStartMessage,
+    AtRTCPDataMessage,
+    RelayToAccessClientMessage,
+    RtAErrorMessage,
+    RtAStartOKMessage,
+    RtATCPDataMessage,
+)
+
+parser = argparse.ArgumentParser(
+    description="Connect to the HTTP network relay, "
+    "request a connection to a target host running `edge-agent`.\n"
+    "Send data from stdin to the target host and print data received "
+    "from the target host to stdout."
+)
 parser.add_argument("target_host_identifier", help="The target host identifier")
 parser.add_argument("target_ip", help="The target IP")
 parser.add_argument("target_port", type=int, help="The target port")
 parser.add_argument("protocol", help="The protocol to use (e.g. 'udp' or 'tcp')")
 
-# also takes the server_url but can take environment variable HTTP_NETWORK_RELAY_SERVER_URL
 parser.add_argument(
-    "--server_url",
-    help="The server URL",
+    "--relay-url",
+    help="The relay URL",
     default=os.getenv(
-        "HTTP_NETWORK_RELAY_SERVER_URL", "ws://127.0.0.1:8000/ws_for_ssh_proxy_command"
+        "HTTP_NETWORK_RELAY_URL", "ws://127.0.0.1:8000/ws_for_access_clients"
     ),
 )
 parser.add_argument(
-    "--secret-key",
-    help="The secret key",
-    default=os.getenv("HTTP_NETWORK_RELAY_SECRET_KEY", None),
+    "--secret",
+    help="The secret used to authenticate with the relay",
+    default=os.getenv("HTTP_NETWORK_RELAY_SECRET", None),
 )
 
 debug = False
@@ -49,33 +54,32 @@ def eprint(*args, only_debug=False, **kwargs):
 
 async def async_main():
     args = parser.parse_args()
-    if args.server_url is None:
-        raise ValueError("server_url is required")
-    if args.secret_key is None:
-        raise ValueError("secret_key is required")
-
-    async with connect(args.server_url) as websocket:
-        start_message = SSHProxyCommandToServerMessage(
-            inner=PtSStartMessage(
+    if args.relay_url is None:
+        raise ValueError("relay_url is required")
+    if args.secret is None:
+        raise ValueError("secret is required")
+    async with connect(args.relay_url) as websocket:
+        start_message = AccessClientToRelayMessage(
+            inner=AtRStartMessage(
                 connection_target=args.target_host_identifier,
                 target_ip=args.target_ip,
                 target_port=args.target_port,
                 protocol=args.protocol,
-                secret_key=args.secret_key,
+                secret=args.secret,
             )
         )
         await websocket.send(start_message.model_dump_json())
         eprint(f"Sent start message: {start_message}")
         start_response_json = await websocket.recv()
-        start_response = ServerToSSHProxyCommandMessage.model_validate_json(
+        start_response = RelayToAccessClientMessage.model_validate_json(
             start_response_json
         )
         eprint(f"Received start response: {start_response}")
-        if isinstance(start_response.inner, StPErrorMessage):
+        if isinstance(start_response.inner, RtAStartOKMessage):
+            eprint(f"Received OK message: {start_response}")
+        elif isinstance(start_response.inner, RtAErrorMessage):
             eprint(f"Received error message: {start_response}")
             return
-        elif isinstance(start_response.inner, StPStartOKMessage):
-            eprint(f"Received OK message: {start_response}")
 
         # start async coroutine to read stdin and send it to the server
         async def read_stdin_and_send():
@@ -88,8 +92,8 @@ async def async_main():
                 if not data:
                     break
                 await websocket.send(
-                    SSHProxyCommandToServerMessage(
-                        inner=PtSTCPDataMessage(
+                    AccessClientToRelayMessage(
+                        inner=AtRTCPDataMessage(
                             data_base64=base64.b64encode(data).decode("utf-8")
                         )
                     ).model_dump_json()
@@ -106,16 +110,16 @@ async def async_main():
             except websockets.exceptions.ConnectionClosedOK as e:
                 eprint(f"Connection closed: OK: {e}")
                 break
-            message = ServerToSSHProxyCommandMessage.model_validate_json(json_data)
+            message = RelayToAccessClientMessage.model_validate_json(json_data)
             eprint(f"Received message: {message}", only_debug=True)
-            if isinstance(message.inner, StPTCPDataMessage):
+            if isinstance(message.inner, RtATCPDataMessage):
                 tcp_data_message = message.inner
                 eprint(
                     f"Received TCP data message: {tcp_data_message}", only_debug=True
                 )
                 sys.stdout.buffer.write(base64.b64decode(tcp_data_message.data_base64))
                 sys.stdout.flush()
-            elif isinstance(message.inner, StPErrorMessage):
+            elif isinstance(message.inner, RtAErrorMessage):
                 eprint(f"Received error message: {message}")
             else:
                 eprint(f"Unknown message received: {message}")
@@ -126,3 +130,6 @@ async def async_main():
 
 def main():
     asyncio.run(async_main())
+
+if __name__ == "__main__":
+    main()

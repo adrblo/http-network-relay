@@ -1,68 +1,74 @@
 # Tunnel TCP over HTTP using WebSockets
 
-|<video src="https://github.com/user-attachments/assets/7ddd48a1-e5d8-4b76-9efc-499b9e63cdad" />|
-|-|
-|Server, client and SSH proxy command in action|
+| <video src="https://github.com/user-attachments/assets/7ddd48a1-e5d8-4b76-9efc-499b9e63cdad" /> |
+| ----------------------------------------------------------------------------------------------- |
+| Network Relay, Edge Agent and Access Client in action                                           |
 
-Three binaries: `server`, `client`, and `ssh-proxy-command`.
+Three binaries: `network-relay`, `edge-agent` and `access-client` are provided to tunnel TCP over HTTP using WebSockets.
 
-The server is supposed to be run on a machine with a public IP address.
-Ideally the server should be run behind a reverse proxy that terminates TLS, such that the clients can trust the server's identity.
+The `network-relay` is supposed to be run on a machine with a public IP address.
+Ideally, `network-relay` should be run behind a reverse proxy that terminates TLS, such that the clients can trust the server's identity.
 
-The client is supposed to be run on a machine that needs to access the server's network.
-The client will establish a WebSocket connection to the server.
+The `edge-agent` is supposed to be run on a machine that needs to access the server's network.
+The `edge-agent` will establish a WebSocket connection to the server.
 
-The `ssh-proxy-command` is a script that can be used as a ProxyCommand in an SSH configuration file.
+The `access-client` is a script that can be used as a ProxyCommand in an SSH configuration file.
 It will establish a WebSocket connection to the server and forward the SSH connection over the WebSocket connection.
 It can also be used as a general purpose proxy command for other protocols.
 
-## Server
+## Server Configuration and Usage
 
-Expects environment variable `HTTP_NETWORK_RELAY_CREDENTIALS_FILE` to point to a json file with the following structure:
+The **Network Relay** server binary is designed to operate on a machine with a public IP address. For enhanced security, it is recommended to deploy the server behind a reverse proxy that handles TLS termination, ensuring that clients can verify the server's identity.
+
+The server requires the environment variable `HTTP_NETWORK_RELAY_CREDENTIALS_FILE` to point to a JSON file structured as follows:
 
 ```json
 {
-  "clients": {
-    "client-name": "THIS-IS-THE-SECRET-THE-CLIENT-USES-TO-AUTHENTICATE-WITH-THE-SERVER"
+  "edge-agents": {
+    "<agent-name1>": "<agent-secret1>",
+    "<agent-name2>": "<agent-secret2>"
   },
-  "proxy_users": [
-    "THIS-IS-A-TOKEN-THAT-PROXY-USERS-USE-TO-AUTHENTICATE-WITH-THE-SERVER"
+  "access-client-secrets": [
+    "<access-client-secret1>",
+    "<access-client-secret2>"
   ]
 }
 ```
 
-## Client
+## Edge Agent
 
-The client will establish a WebSocket connection to the server.
+The **Edge Agent** will establish a WebSocket connection to the server.
 
-Usage: `client --server_url <server_url> --client-name <client-name> --client-secret <client-secret>`
+Usage: `edge-agent --relay-url <relay_url> --name <name> --secret <secret>`
 
-It will connect to the server using the `--server_url` command line argument.
-The default value is `ws://127.0.0.1:8000/ws_for_clients`.
-This can be set using the environment variable `HTTP_NETWORK_RELAY_SERVER_URL`.
+It will connect to the server using the `--relay-url` command line argument.
+The default value is `ws://127.0.0.1:8000/ws_for_edge_agents`.
+This can be set using the environment variable `HTTP_NETWORK_RELAY_URL`.
 
-The client will identify itself to the server using the `client-name` command line argument.
-The `client-name` is a unique identifier for the client and is used to authenticate the client with the server, as well as identify the client to the server and users.
-The client will authenticate with the server using the `client-secret` command line argument.
-Both can be set using environment variables `HTTP_NETWORK_RELAY_CLIENT_NAME` and `HTTP_NETWORK_RELAY_CLIENT_SECRET`.
-For the client to be able to authenticate with the server, the server must have the client's name and secret in its credentials file.
+The **Edge Agent** will identify itself to the server using the `--name` command line argument.
+The **Edge Agent**'s `name` is a unique identifier for the running instance and
+is used to authenticate the **Edge Agent** with the relay,
+as well as identify the **Edge Agent** to the end users.
+The **Edge Agent** will authenticate with the server using the `--secret` command line argument.
+Both can be set using environment variables `HTTP_NETWORK_RELAY_NAME` and `HTTP_NETWORK_RELAY_SECRET`.
 
-## SSH Proxy Command
+## Access Client
 
-The `ssh-proxy-command` script can be used as a ProxyCommand in an SSH configuration file.
+The `access-client` script provides a general purpose proxy command for other protocols.
 
-Usage: `ssh-proxy-command <target_host_identifier> <target_ip> <target_port> <protocol> --server_url <server_url> --secret-key <secret_key>`
+Usage: `access-client <target_host_identifier> <target_ip> <target_port> <protocol> --relay-url <relay_url> --secret <secret>`
 
-The `target_host_identifier` is the `client-name` of the client that connects to the server.
-The `target_ip` and `target_port` are the IP address and port of the connection that the client wants to establish.
-The `protocol` is the protocol that the client wants to use (e.g. 'udp' or 'tcp'). Currently only 'tcp' is supported.
+The `target_host_identifier` is the `name` of the **Edge Agent** that a connection is to be established with.
+The `target_ip` and `target_port` are the IP address and port of the connection that the **Edge Agent** wants to establish.
+The `protocol` is the protocol that the **Edge Agent** wants to use (e.g. 'udp' or 'tcp'). Currently, only 'tcp' is supported.
 
-The `server_url` is the URL of the server that the client wants to connect to.
-It can also be set using the environment variable `HTTP_NETWORK_RELAY_SERVER_URL`.
+The `relay-url` is the URL of the server that the **Edge Agent** wants to connect to.
+The default value is `ws://127.0.0.1:8000/ws_for_access_clients`.
+It can also be set using the environment variable `HTTP_NETWORK_RELAY_URL`.
 
-The proxy command also takes a `secret-key` argument.
-This is the secret key that the client uses to authenticate with the server.
-It can also be set using the environment variable `HTTP_NETWORK_RELAY_SECRET_KEY`.
+The `secret` is the secret that the **Edge Agent** uses to authenticate with the relay.
+This is the secret that the **Edge Agent** uses to authenticate with the relay.
+It can also be set using the environment variable `HTTP_NETWORK_RELAY_SECRET`.
 
-The `ssh-proxy-command` script will establish a WebSocket connection to the server and forward its stdin and stdout to the server.
-The server will forward the data to the client, which will then establish the connection to the target connection details.
+The `access-client` script will establish a WebSocket connection to the server and forward its stdin and stdout to the server.
+The server will forward the data to the **Edge Agent**, which will then establish the connection to the target connection details.

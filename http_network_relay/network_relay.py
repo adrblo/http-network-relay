@@ -1,39 +1,39 @@
 #!/usr/bin/env python
-import asyncio
-from typing import Union
-import uvicorn
 import argparse
+import asyncio
+import json
 import os
+import sys
 import uuid
+from typing import Union
 
+import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from .pydantic_models import (
-    ClientToServerMessage,
-    CtSConnectionResetMessage,
-    CtSInitiateConnectionErrorMessage,
-    CtSInitiateConnectionOKMessage,
-    CtSStartMessage,
-    CtSTCPDataMessage,
-    PtSTCPDataMessage,
-    ServerToClientMessage,
-    SSHProxyCommandToServerMessage,
-    ServerToSSHProxyCommandMessage,
-    PtSStartMessage,
-    StCInitiateConnectionMessage,
-    StCTCPDataMessage,
-    StPErrorMessage,
-    StPStartOKMessage,
-    StPTCPDataMessage,
+    AccessClientToRelayMessage,
+    AtRStartMessage,
+    AtRTCPDataMessage,
+    EdgeAgentToRelayMessage,
+    EtRConnectionResetMessage,
+    EtRInitiateConnectionErrorMessage,
+    EtRInitiateConnectionOKMessage,
+    EtRStartMessage,
+    EtRTCPDataMessage,
+    RelayToAccessClientMessage,
+    RelayToEdgeAgentMessage,
+    RtAErrorMessage,
+    RtAStartOKMessage,
+    RtATCPDataMessage,
+    RtEInitiateConnectionMessage,
+    RtETCPDataMessage,
 )
-import sys
-import json
 
 app = FastAPI()
 
-client_connections = []
-registered_client_connections = {}  # name -> connection
-ssh_proxy_command_connections = []
+agent_connections = []
+registered_agent_connections = {}  # name -> connection
+access_client_connections = []
 
 initiate_connection_answer_queue = asyncio.Queue()
 
@@ -49,78 +49,78 @@ def eprint(*args, only_debug=False, **kwargs):
 
 CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
 
-with open(CREDENTIALS_FILE) as f:
+with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f:
     credentials = json.load(f)
 
 
-@app.websocket("/ws_for_clients")
-async def websocket_for_clients(websocket: WebSocket):
+@app.websocket("/ws_for_edge_agents")
+async def ws_for_edge_agents(websocket: WebSocket):
     await websocket.accept()
-    client_connections.append(websocket)
+    agent_connections.append(websocket)
     start_message_json_data = await websocket.receive_text()
-    start_message = ClientToServerMessage.model_validate_json(
+    start_message = EdgeAgentToRelayMessage.model_validate_json(
         start_message_json_data
     ).inner
     eprint(f"Message received from client: {start_message}")
-    if not isinstance(start_message, CtSStartMessage):
+    if not isinstance(start_message, EtRStartMessage):
         eprint(f"Unknown message received from client: {start_message}")
         return
     #  check if we know the client
-    if start_message.client_name not in credentials["clients"]:
-        eprint(f"Unknown client: {start_message.client_name}")
+    if start_message.name not in credentials["edge-agents"]:
+        eprint(f"Unknown client: {start_message.name}")
         # close the connection
         await websocket.close()
         return
 
     # check if the secret is correct
-    if credentials["clients"][start_message.client_name] != start_message.client_secret:
-        eprint(f"Invalid secret for client: {start_message.client_name}")
+    if credentials["edge-agents"][start_message.name] != start_message.secret:
+        eprint(f"Invalid secret for client: {start_message.name}")
         # close the connection
         await websocket.close()
         return
 
     # check if the client is already registered
-    if start_message.client_name in registered_client_connections:
-        eprint(f"Client already registered: {start_message.client_name}")
+    if start_message.name in registered_agent_connections:
+        eprint(f"Client already registered: {start_message.name}")
         # close the connection
         await websocket.close()
         return
 
-    registered_client_connections[start_message.client_name] = websocket
-    eprint(f"Registered client connection: {start_message.client_name}")
+    registered_agent_connections[start_message.name] = websocket
+    eprint(f"Registered client connection: {start_message.name}")
 
     while True:
         try:
             json_data = await websocket.receive_text()
         except WebSocketDisconnect:
-            eprint(f"Client disconnected: {start_message.client_name}")
-            del registered_client_connections[start_message.client_name]
+            eprint(f"Client disconnected: {start_message.name}")
+            del registered_agent_connections[start_message.name]
             break
-        message = ClientToServerMessage.model_validate_json(json_data)
+        message = EdgeAgentToRelayMessage.model_validate_json(json_data)
         eprint(f"Message received from client: {message}", only_debug=True)
-        if isinstance(message.inner, CtSInitiateConnectionErrorMessage):
+        if isinstance(message.inner, EtRInitiateConnectionErrorMessage):
             eprint(f"Received initiate connection error message from client: {message}")
             await initiate_connection_answer_queue.put(message.inner)
-        elif isinstance(message.inner, CtSInitiateConnectionOKMessage):
+        elif isinstance(message.inner, EtRInitiateConnectionOKMessage):
             eprint(f"Received initiate connection OK message from client: {message}")
             await initiate_connection_answer_queue.put(message.inner)
-        elif isinstance(message.inner, CtSTCPDataMessage):
+        elif isinstance(message.inner, EtRTCPDataMessage):
             eprint(f"Received TCP data message from client: {message}", only_debug=True)
             tcp_data_message = message.inner
             if tcp_data_message.connection_id not in active_connections:
                 eprint(f"Unknown connection_id: {tcp_data_message.connection_id}")
                 continue
-            client_connection, proxy_command_connection = active_connections[
+            _agent_connection, access_client_connection = active_connections[
                 tcp_data_message.connection_id
             ]
-            await proxy_command_connection.send_text(
-                ServerToSSHProxyCommandMessage(
-                    inner=StPTCPDataMessage(
+            await access_client_connection.send_text(
+                RelayToAccessClientMessage(
+                    inner=RtATCPDataMessage(
                         data_base64=tcp_data_message.data_base64,
                     )
                 ).model_dump_json()
             )
-        elif isinstance(message.inner, CtSConnectionResetMessage):
+        elif isinstance(message.inner, EtRConnectionResetMessage):
             eprint(f"Received connection reset message from client: {message}")
             connection_reset_message = message.inner
             if connection_reset_message.connection_id not in active_connections:
@@ -128,58 +128,58 @@ async def websocket_for_clients(websocket: WebSocket):
                     f"Unknown connection_id: {connection_reset_message.connection_id}"
                 )
                 continue
-            client_connection, proxy_command_connection = active_connections[
+            agent_connection, access_client_connection = active_connections[
                 connection_reset_message.connection_id
             ]
-            await proxy_command_connection.send_text(
-                ServerToSSHProxyCommandMessage(
-                    inner=StPErrorMessage(
+            await access_client_connection.send_text(
+                RelayToAccessClientMessage(
+                    inner=RtAErrorMessage(
                         message=connection_reset_message.message,
                     )
                 ).model_dump_json()
             )
             del active_connections[connection_reset_message.connection_id]
             # close the connection
-            await proxy_command_connection.close()
+            await access_client_connection.close()
         else:
             eprint(f"Unknown message received from client: {message}")
 
 
-@app.websocket("/ws_for_ssh_proxy_command")
-async def websocket_for_ssh_proxy_command(websocket: WebSocket):
+@app.websocket("/ws_for_access_clients")
+async def ws_for_access_clients(websocket: WebSocket):
     await websocket.accept()
-    ssh_proxy_command_connections.append(websocket)
+    access_client_connections.append(websocket)
     json_data = await websocket.receive_text()
-    message = SSHProxyCommandToServerMessage.model_validate_json(json_data)
-    eprint(f"Message received from SSH proxy command: {message}")
-    if not isinstance(message.inner, PtSStartMessage):
-        eprint(f"Unknown message received from SSH proxy command: {message}")
+    message = AccessClientToRelayMessage.model_validate_json(json_data)
+    eprint(f"Message received from access client: {message}")
+    if not isinstance(message.inner, AtRStartMessage):
+        eprint(f"Unknown message received from access client: {message}")
         return
     start_message = message.inner
     # check if credentials are correct
-    if start_message.secret_key not in credentials["proxy_users"]:
-        eprint(f"Invalid secret key: {start_message.secret_key}")
+    if start_message.secret not in credentials["access-client-secrets"]:
+        eprint(f"Invalid access client secret: {start_message.secret}")
         # send a message back and kill the connection
         await websocket.send_text(
-            ServerToSSHProxyCommandMessage(
-                inner=StPErrorMessage(message="Invalid secret key")
+            RelayToAccessClientMessage(
+                inner=RtAErrorMessage(message="Invalid access client secret")
             ).model_dump_json()
         )
     # check if the client is registered
-    if not start_message.connection_target in registered_client_connections:
-        eprint(f"Client not registered: {start_message.connection_target}")
+    if not start_message.connection_target in registered_agent_connections:
+        eprint(f"Agent not registered: {start_message.connection_target}")
         # send a message back and kill the connection
         await websocket.send_text(
-            ServerToSSHProxyCommandMessage(
-                inner=StPErrorMessage(message="Client not registered")
+            RelayToAccessClientMessage(
+                inner=RtAErrorMessage(message="Agent not registered")
             ).model_dump_json()
         )
         await websocket.close()
         return
-    client_connection = registered_client_connections[start_message.connection_target]
+    agent_connection = registered_agent_connections[start_message.connection_target]
     await start_connection(
-        client_connection=client_connection,
-        proxy_command_connection=websocket,
+        agent_connection=agent_connection,
+        access_client_connection=websocket,
         connection_target=start_message.connection_target,
         target_ip=start_message.target_ip,
         target_port=start_message.target_port,
@@ -187,14 +187,12 @@ async def websocket_for_ssh_proxy_command(websocket: WebSocket):
     )
 
 
-active_connections = (
-    {}
-)  # connection_id -> (client_connection, proxy_command_connection)
+active_connections = {}  # connection_id -> (agent_connection, access_client_connection)
 
 
 async def start_connection(
-    client_connection,
-    proxy_command_connection,
+    agent_connection,
+    access_client_connection,
     connection_target,
     target_ip,
     target_port,
@@ -204,10 +202,10 @@ async def start_connection(
     eprint(
         f"Starting connection to {target_ip}:{target_port} for {connection_target} using {protocol} with connection_id {connection_id}"
     )
-    active_connections[connection_id] = (client_connection, proxy_command_connection)
-    await client_connection.send_text(
-        ServerToClientMessage(
-            inner=StCInitiateConnectionMessage(
+    active_connections[connection_id] = (agent_connection, access_client_connection)
+    await agent_connection.send_text(
+        RelayToEdgeAgentMessage(
+            inner=RtEInitiateConnectionMessage(
                 target_ip=target_ip,
                 target_port=target_port,
                 protocol=protocol,
@@ -218,51 +216,54 @@ async def start_connection(
     # wait for the client to respond
     message = await initiate_connection_answer_queue.get()
     if not isinstance(
-        message, (CtSInitiateConnectionErrorMessage, CtSInitiateConnectionOKMessage)
+        message, (EtRInitiateConnectionErrorMessage, EtRInitiateConnectionOKMessage)
     ):
         raise ValueError(f"Unexpected message: {message}")
     if message.connection_id != connection_id:
         raise ValueError(f"Unexpected connection_id: {message.connection_id}")
-    if isinstance(message, CtSInitiateConnectionErrorMessage):
+    if isinstance(message, EtRInitiateConnectionErrorMessage):
         eprint(f"Received error message from client: {message}")
-        await proxy_command_connection.send_text(
-            ServerToSSHProxyCommandMessage(
-                inner=StPErrorMessage(
+        await access_client_connection.send_text(
+            RelayToAccessClientMessage(
+                inner=RtAErrorMessage(
                     message=f"Initiating connection failed: {message.message}"
                 )
             ).model_dump_json()
         )
         # close the connection
-        await proxy_command_connection.close()
+        await access_client_connection.close()
         del active_connections[connection_id]
         return
-    if isinstance(message, CtSInitiateConnectionOKMessage):
+    if isinstance(message, EtRInitiateConnectionOKMessage):
         eprint(f"Received OK message from client: {message}")
-    await proxy_command_connection.send_text(
-        ServerToSSHProxyCommandMessage(inner=StPStartOKMessage()).model_dump_json()
+    await access_client_connection.send_text(
+        RelayToAccessClientMessage(inner=RtAStartOKMessage()).model_dump_json()
     )
 
     while True:
         try:
-            json_data = await proxy_command_connection.receive_text()
+            json_data = await access_client_connection.receive_text()
         except WebSocketDisconnect:
-            eprint(f"SSH proxy command disconnected: {connection_id}")
+            eprint(f"access client disconnected: {connection_id}")
             if connection_id in active_connections:
                 del active_connections[connection_id]
             break
-        message = SSHProxyCommandToServerMessage.model_validate_json(json_data)
-        if isinstance(message.inner, PtSTCPDataMessage):
-            eprint(f"Received TCP data message from SSH proxy command: {message}", only_debug=True)
-            await client_connection.send_text(
-                ServerToClientMessage(
-                    inner=StCTCPDataMessage(
+        message = AccessClientToRelayMessage.model_validate_json(json_data)
+        if isinstance(message.inner, AtRTCPDataMessage):
+            eprint(
+                f"Received TCP data message from access client: {message}",
+                only_debug=True,
+            )
+            await agent_connection.send_text(
+                RelayToEdgeAgentMessage(
+                    inner=RtETCPDataMessage(
                         connection_id=connection_id,
                         data_base64=message.inner.data_base64,
                     )
                 ).model_dump_json()
             )
         else:
-            eprint(f"Unknown message received from SSH proxy command: {message}")
+            eprint(f"Unknown message received from access client: {message}")
 
 
 parser = argparse.ArgumentParser(description="Run the HTTP network relay server")
@@ -282,8 +283,11 @@ parser.add_argument(
 def main():
     args = parser.parse_args()
     uvicorn.run(
-        "http_network_relay.server:app",
+        "http_network_relay.network_relay:app",
         host=args.host,
         port=args.port,
         log_level="info",
     )
+
+if __name__ == "__main__":
+    main()

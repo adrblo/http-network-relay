@@ -7,7 +7,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, poetry2nix, ... }:
+  outputs = { nixpkgs, poetry2nix, ... }:
   let
     eachSystem = nixpkgs.lib.genAttrs ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
   in
@@ -22,6 +22,11 @@
           name = "http-network-relay";
           projectDir = ./.;
           python = pkgs.python312;
+          checkPhase = ''
+            runHook preCheck
+            pytest
+            runHook postCheck
+          '';
         };
       }
     );

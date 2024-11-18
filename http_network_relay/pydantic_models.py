@@ -1,52 +1,54 @@
 from typing import Literal, Union
+
 from pydantic import BaseModel, Field
 
 
-class ClientToServerMessage(BaseModel):
+class EdgeAgentToRelayMessage(BaseModel):
     inner: Union[
-        "CtSStartMessage",
-        "CtSInitiateConnectionErrorMessage",
-        "CtSInitiateConnectionOKMessage",
-        "CtSTCPDataMessage",
-        "CtSConnectionResetMessage",
+        "EtRStartMessage",
+        "EtRInitiateConnectionErrorMessage",
+        "EtRInitiateConnectionOKMessage",
+        "EtRTCPDataMessage",
+        "EtRConnectionResetMessage",
     ] = Field(discriminator="kind")
 
 
-class CtSStartMessage(BaseModel):
+class EtRStartMessage(BaseModel):
     kind: Literal["start"] = "start"
-    client_name: str
-    client_secret: str
+    name: str
+    secret: str
 
 
-class CtSInitiateConnectionErrorMessage(BaseModel):
+class EtRInitiateConnectionErrorMessage(BaseModel):
     kind: Literal["initiate_connection_error"] = "initiate_connection_error"
     message: str
     connection_id: str
 
 
-class CtSInitiateConnectionOKMessage(BaseModel):
+class EtRInitiateConnectionOKMessage(BaseModel):
     kind: Literal["initiate_connection_ok"] = "initiate_connection_ok"
     connection_id: str
 
 
-class CtSTCPDataMessage(BaseModel):
+class EtRTCPDataMessage(BaseModel):
     kind: Literal["tcp_data"] = "tcp_data"
     connection_id: str
     data_base64: str
 
 
-class CtSConnectionResetMessage(BaseModel):
+class EtRConnectionResetMessage(BaseModel):
     kind: Literal["connection_reset"] = "connection_reset"
     message: str
     connection_id: str
 
-class ServerToClientMessage(BaseModel):
-    inner: Union["StCInitiateConnectionMessage", "StCTCPDataMessage"] = Field(
+
+class RelayToEdgeAgentMessage(BaseModel):
+    inner: Union["RtEInitiateConnectionMessage", "RtETCPDataMessage"] = Field(
         discriminator="kind"
     )
 
 
-class StCInitiateConnectionMessage(BaseModel):
+class RtEInitiateConnectionMessage(BaseModel):
     kind: Literal["initiate_connection"] = "initiate_connection"
     target_ip: str
     target_port: int
@@ -54,49 +56,46 @@ class StCInitiateConnectionMessage(BaseModel):
     connection_id: str
 
 
-class StCTCPDataMessage(BaseModel):
+class RtETCPDataMessage(BaseModel):
     kind: Literal["tcp_data"] = "tcp_data"
     connection_id: str
     data_base64: str
 
 
-class SSHProxyCommandToServerMessage(BaseModel):
-    inner: Union["PtSStartMessage", "PtSTCPDataMessage"] = Field(discriminator="kind")
+class AccessClientToRelayMessage(BaseModel):
+    inner: Union["AtRStartMessage", "AtRTCPDataMessage"] = Field(discriminator="kind")
 
 
-# PtS = (SSH) *P*roxy (Command) *t*o *S*erver
-
-
-class PtSStartMessage(BaseModel):
+class AtRStartMessage(BaseModel):
     kind: Literal["start"] = "start"
     connection_target: str
     target_ip: str
     target_port: int
     protocol: str
-    secret_key: str
+    secret: str
 
 
-class PtSTCPDataMessage(BaseModel):
+class AtRTCPDataMessage(BaseModel):
     kind: Literal["tcp_data"] = "tcp_data"
     data_base64: str
 
 
-class ServerToSSHProxyCommandMessage(BaseModel):
-    inner: Union["StPErrorMessage", "StPStartOKMessage", "StPTCPDataMessage"] = Field(
+class RelayToAccessClientMessage(BaseModel):
+    inner: Union["RtAErrorMessage", "RtAStartOKMessage", "RtATCPDataMessage"] = Field(
         discriminator="kind"
     )
 
 
-class StPErrorMessage(BaseModel):
+class RtAErrorMessage(BaseModel):
     kind: Literal["error"] = "error"
     message: str
 
 
-class StPStartOKMessage(BaseModel):
+class RtAStartOKMessage(BaseModel):
     kind: Literal["start_ok"] = "start_ok"
 
 
-class StPTCPDataMessage(BaseModel):
+class RtATCPDataMessage(BaseModel):
     kind: Literal["tcp_data"] = "tcp_data"
     data_base64: str
 
