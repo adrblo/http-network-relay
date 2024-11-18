@@ -1,6 +1,6 @@
 # Tunnel TCP over HTTP using WebSockets
 
-| <video src="https://github.com/user-attachments/assets/7ddd48a1-e5d8-4b76-9efc-499b9e63cdad" /> |
+| <video src="https://github.com/user-attachments/assets/422eada0-0ae1-429d-855a-d268eba4d78e" /> |
 | ----------------------------------------------------------------------------------------------- |
 | Network Relay, Edge Agent and Access Client in action                                           |
 
