@@ -295,8 +295,10 @@ def main():
         global CREDENTIALS
         CREDENTIALS = json.load(f)
 
+    eprint(f"CREDENTIALS: {CREDENTIALS}")
+
     uvicorn.run(
-        "http_network_relay.network_relay:app",
+        app,
         host=args.host,
         port=args.port,
         log_level="info",
