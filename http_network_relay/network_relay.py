@@ -295,8 +295,6 @@ def main():
         global CREDENTIALS
         CREDENTIALS = json.load(f)
 
-    eprint(f"CREDENTIALS: {CREDENTIALS}")
-
     uvicorn.run(
         app,
         host=args.host,
