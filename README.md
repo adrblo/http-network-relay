@@ -20,7 +20,9 @@ It can also be used as a general purpose proxy command for other protocols.
 
 The **Network Relay** server binary is designed to operate on a machine with a public IP address. For enhanced security, it is recommended to deploy the server behind a reverse proxy that handles TLS termination, ensuring that clients can verify the server's identity.
 
-The server requires the environment variable `HTTP_NETWORK_RELAY_CREDENTIALS_FILE` to point to a JSON file structured as follows:
+Usage: `network-relay [-h] [--host HOST] [--port PORT] [--credentials-file CREDENTIALS_FILE]`
+
+The credentials file is a JSON file structured as follows:
 
 ```json
 {
@@ -34,6 +36,8 @@ The server requires the environment variable `HTTP_NETWORK_RELAY_CREDENTIALS_FIL
   ]
 }
 ```
+
+It can be set using the `--credentials-file` command line argument, or the environment variable `HTTP_NETWORK_RELAY_CREDENTIALS_FILE`.
 
 ## Edge Agent
 
