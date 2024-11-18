@@ -125,7 +125,6 @@ def test_can_run_and_proxy_tcp():
     access_client.stdin.write(b"hello\n")
     access_client.stdin.flush()
     response = access_client.stdout.readline()
-    assert response == b"olleh\n"
     access_client.stdin.close()
     access_client.terminate()
     access_client.kill()
@@ -140,3 +139,5 @@ def test_can_run_and_proxy_tcp():
     relay_thread.join()
     edge_agent_thread.join()
     access_client.wait()
+    
+    assert response == b"olleh\n"

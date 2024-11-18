@@ -34,15 +34,7 @@ CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials
 CREDENTIALS = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    with open(CREDENTIALS_FILE, "r") as f:
-        global CREDENTIALS
-        CREDENTIALS = json.load(f)
-
-    yield
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 agent_connections = []
 registered_agent_connections = {}  # name -> connection
@@ -298,6 +290,10 @@ def main():
     args = parser.parse_args()
     global CREDENTIALS_FILE
     CREDENTIALS_FILE = args.credentials_file
+
+    with open(CREDENTIALS_FILE) as f:
+        global CREDENTIALS
+        CREDENTIALS = json.load(f)
 
     uvicorn.run(
         "http_network_relay.network_relay:app",
