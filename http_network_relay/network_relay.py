@@ -50,9 +50,6 @@ def eprint(*args, only_debug=False, **kwargs):
 CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
 CREDENTIALS = None
 
-
-
-
 @app.websocket("/ws_for_edge_agents")
 async def ws_for_edge_agents(websocket: WebSocket):
     await websocket.accept()
