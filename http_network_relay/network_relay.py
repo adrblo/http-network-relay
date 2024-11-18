@@ -48,9 +48,9 @@ def eprint(*args, only_debug=False, **kwargs):
 
 
 CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
+CREDENTIALS = None
 
-with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f:
-    credentials = json.load(f)
+
 
 
 @app.websocket("/ws_for_edge_agents")
@@ -66,14 +66,14 @@ async def ws_for_edge_agents(websocket: WebSocket):
         eprint(f"Unknown message received from client: {start_message}")
         return
     #  check if we know the client
-    if start_message.name not in credentials["edge-agents"]:
+    if start_message.name not in CREDENTIALS["edge-agents"]:
         eprint(f"Unknown client: {start_message.name}")
         # close the connection
         await websocket.close()
         return
 
     # check if the secret is correct
-    if credentials["edge-agents"][start_message.name] != start_message.secret:
+    if CREDENTIALS["edge-agents"][start_message.name] != start_message.secret:
         eprint(f"Invalid secret for client: {start_message.name}")
         # close the connection
         await websocket.close()
@@ -157,7 +157,7 @@ async def ws_for_access_clients(websocket: WebSocket):
         return
     start_message = message.inner
     # check if credentials are correct
-    if start_message.secret not in credentials["access-client-secrets"]:
+    if start_message.secret not in CREDENTIALS["access-client-secrets"]:
         eprint(f"Invalid access client secret: {start_message.secret}")
         # send a message back and kill the connection
         await websocket.send_text(
@@ -280,7 +280,11 @@ parser.add_argument(
 )
 
 
+
 def main():
+    with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f:
+        global CREDENTIALS
+        CREDENTIALS = json.load(f)
     args = parser.parse_args()
     uvicorn.run(
         "http_network_relay.network_relay:app",
