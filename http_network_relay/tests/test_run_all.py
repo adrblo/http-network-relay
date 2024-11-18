@@ -7,8 +7,9 @@ import socket
 import random
 import tempfile
 import json
+import pytest
 
-
+@pytest.mark.timeout(10)
 def test_can_run_and_proxy_tcp():
     # start 3 threads to supervise 3 processes each, 1 more to listen to tcp
     # 0. start tcp listening thread
