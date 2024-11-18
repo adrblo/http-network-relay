@@ -24,7 +24,7 @@
           python = pkgs.python312;
           checkPhase = ''
             runHook preCheck
-            pytest
+            pytest --session-timeout=10
             runHook postCheck
           '';
         };
