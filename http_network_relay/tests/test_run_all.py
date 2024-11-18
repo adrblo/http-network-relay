@@ -57,8 +57,8 @@ def test_can_run_and_proxy_tcp():
             )
             f.flush()
 
-            env = os.environ.copy()
-            env["HTTP_NETWORK_RELAY_CREDENTIALS_FILE"] = f.name
+            # env = os.environ.copy()
+            # env["HTTP_NETWORK_RELAY_CREDENTIALS_FILE"] = f.name
 
             relay_server = subprocess.Popen(
                 [
@@ -67,8 +67,10 @@ def test_can_run_and_proxy_tcp():
                     "http_network_relay.network_relay",
                     "--port",
                     str(port_relay),
+                    "--credentials-file",
+                    f.name,
                 ],
-                env=env,
+                # env=env,
             )
             started_subprocesses.append(relay_server)
             relay_server.wait()

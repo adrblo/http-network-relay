@@ -278,14 +278,19 @@ parser.add_argument(
     type=int,
     default=int(os.getenv("HTTP_NETWORK_RELAY_SERVER_PORT", "8000")),
 )
-
+parser.add_argument(
+    "--credentials-file",
+    help="The credentials file",
+    default=CREDENTIALS_FILE,
+)
 
 
 def main():
-    with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f:
+    args = parser.parse_args()
+    with open(args.credentials_file) as f:
         global CREDENTIALS
         CREDENTIALS = json.load(f)
-    args = parser.parse_args()
+
     uvicorn.run(
         "http_network_relay.network_relay:app",
         host=args.host,
@@ -295,3 +300,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+else:
+    with open(CREDENTIALS_FILE) as f:
+        CREDENTIALS = json.load(f)
