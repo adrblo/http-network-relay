@@ -186,11 +186,12 @@ async def initiate_connection(
                 ).model_dump_json()
             )
 
-    read_from_tcp_and_send_task = asyncio.create_task(read_from_tcp_and_send())
+    asyncio.create_task(read_from_tcp_and_send())
 
 
 def main():
     asyncio.run(async_main())
+
 
 if __name__ == "__main__":
     main()

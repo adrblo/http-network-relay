@@ -1,13 +1,13 @@
-import threading
-import os
-import sys
-import time
-import subprocess
-import socket
-import random
-import tempfile
 import json
+import random
+import socket
+import subprocess
+import tempfile
+import threading
+import time
+
 import pytest
+
 
 @pytest.mark.timeout(10)
 def test_can_run_and_proxy_tcp():
@@ -139,5 +139,5 @@ def test_can_run_and_proxy_tcp():
     relay_thread.join()
     edge_agent_thread.join()
     access_client.wait()
-    
+
     assert response == b"olleh\n"
