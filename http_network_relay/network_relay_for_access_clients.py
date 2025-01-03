@@ -43,7 +43,7 @@ def eprint(*args, only_debug=False, **kwargs):
         print(*args, file=sys.stderr, **kwargs)
 
 
-class NetworkRelayF(NetworkRelay):
+class NetworkRelayForAccessClients(NetworkRelay):
     def __init__(self, credentials):
         super().__init__(credentials)
         self.active_connections = {}
@@ -284,7 +284,7 @@ def main():
     with open(credentials_file) as f:
         CREDENTIALS = json.load(f)
 
-    network_relay = NetworkRelayF(CREDENTIALS)
+    network_relay = NetworkRelayForAccessClients(CREDENTIALS)
     app.add_websocket_route("/ws_for_edge_agents", network_relay.ws_for_edge_agents)
     app.add_websocket_route(
         "/ws_for_access_clients", network_relay.ws_for_access_clients
