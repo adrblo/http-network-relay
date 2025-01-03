@@ -65,7 +65,7 @@ def test_can_run_and_proxy_tcp():
                 [
                     "python",
                     "-m",
-                    "http_network_relay.network_relay_tcp_tunnel",
+                    "http_network_relay.network_relay_for_access_clients",
                     "--port",
                     str(port_relay),
                     "--credentials-file",

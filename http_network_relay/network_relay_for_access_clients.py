@@ -5,14 +5,11 @@ import json
 import os
 import sys
 import uuid
-from typing import Literal, Union
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
 
-from .network_relay import NetworkRelay
-from .pydantic_models import (
+from .access_client import (
     AccessClientToRelayMessage,
     AtRStartMessage,
     AtRTCPDataMessage,
@@ -20,6 +17,17 @@ from .pydantic_models import (
     RtAErrorMessage,
     RtAStartOKMessage,
     RtATCPDataMessage,
+)
+from .network_relay import NetworkRelay
+from .pydantic_models import (
+    EdgeAgentToRelayMessage,
+    EtRConnectionResetMessage,
+    EtRInitiateConnectionErrorMessage,
+    EtRInitiateConnectionOKMessage,
+    EtRTCPDataMessage,
+    RelayToEdgeAgentMessage,
+    RtEInitiateConnectionMessage,
+    RtETCPDataMessage,
 )
 
 CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
@@ -35,62 +43,7 @@ def eprint(*args, only_debug=False, **kwargs):
         print(*args, file=sys.stderr, **kwargs)
 
 
-class TCPTunnelRelayToEdgeAgentMessage(BaseModel):
-    inner: Union[
-        "TCPTunnelRtEInitiateConnectionMessage", "TCPTunnelRtETCPDataMessage"
-    ] = Field(discriminator="kind")
-
-
-class TCPTunnelRtEInitiateConnectionMessage(BaseModel):
-    kind: Literal["initiate_connection"] = "initiate_connection"
-    target_ip: str
-    target_port: int
-    protocol: str
-    connection_id: str
-
-
-class TCPTunnelRtETCPDataMessage(BaseModel):
-    kind: Literal["tcp_data"] = "tcp_data"
-    connection_id: str
-    data_base64: str
-
-
-class TCPTunnelEdgeAgentToRelayMessage(BaseModel):
-    inner: Union[
-        "TCPTunnelEtRInitiateConnectionErrorMessage",
-        "TCPTunnelEtRInitiateConnectionOKMessage",
-        "TCPTunnelEtRTCPDataMessage",
-        "TCPTunnelEtRConnectionResetMessage",
-    ] = Field(discriminator="kind")
-
-
-class TCPTunnelEtRInitiateConnectionErrorMessage(BaseModel):
-    kind: Literal["initiate_connection_error"] = "initiate_connection_error"
-    message: str
-    connection_id: str
-
-
-class TCPTunnelEtRInitiateConnectionOKMessage(BaseModel):
-    kind: Literal["initiate_connection_ok"] = "initiate_connection_ok"
-    connection_id: str
-
-
-class TCPTunnelEtRTCPDataMessage(BaseModel):
-    kind: Literal["tcp_data"] = "tcp_data"
-    connection_id: str
-    data_base64: str
-
-
-class TCPTunnelEtRConnectionResetMessage(BaseModel):
-    kind: Literal["connection_reset"] = "connection_reset"
-    message: str
-    connection_id: str
-
-
-class TCPTunnelNetworkRelay(NetworkRelay):
-    CustomAgentToRelayMessage = TCPTunnelEdgeAgentToRelayMessage
-    CustomRelayToAgentMessage = TCPTunnelRelayToEdgeAgentMessage
-
+class NetworkRelayF(NetworkRelay):
     def __init__(self, credentials):
         super().__init__(credentials)
         self.active_connections = {}
@@ -157,8 +110,8 @@ class TCPTunnelNetworkRelay(NetworkRelay):
             access_client_connection,
         )
         await agent_connection.send_text(
-            TCPTunnelRelayToEdgeAgentMessage(
-                inner=TCPTunnelRtEInitiateConnectionMessage(
+            RelayToEdgeAgentMessage(
+                inner=RtEInitiateConnectionMessage(
                     target_ip=target_ip,
                     target_port=target_port,
                     protocol=protocol,
@@ -171,14 +124,14 @@ class TCPTunnelNetworkRelay(NetworkRelay):
         if not isinstance(
             message,
             (
-                TCPTunnelEtRInitiateConnectionErrorMessage,
-                TCPTunnelEtRInitiateConnectionOKMessage,
+                EtRInitiateConnectionErrorMessage,
+                EtRInitiateConnectionOKMessage,
             ),
         ):
             raise ValueError(f"Unexpected message: {message}")
         if message.connection_id != connection_id:
             raise ValueError(f"Unexpected connection_id: {message.connection_id}")
-        if isinstance(message, TCPTunnelEtRInitiateConnectionErrorMessage):
+        if isinstance(message, EtRInitiateConnectionErrorMessage):
             eprint(f"Received error message from client: {message}")
             await access_client_connection.send_text(
                 RelayToAccessClientMessage(
@@ -191,7 +144,7 @@ class TCPTunnelNetworkRelay(NetworkRelay):
             await access_client_connection.close()
             del self.active_connections[connection_id]
             return
-        if isinstance(message, TCPTunnelEtRInitiateConnectionOKMessage):
+        if isinstance(message, EtRInitiateConnectionOKMessage):
             eprint(f"Received OK message from client: {message}")
         await access_client_connection.send_text(
             RelayToAccessClientMessage(inner=RtAStartOKMessage()).model_dump_json()
@@ -212,8 +165,8 @@ class TCPTunnelNetworkRelay(NetworkRelay):
                     only_debug=True,
                 )
                 await agent_connection.send_text(
-                    TCPTunnelRelayToEdgeAgentMessage(
-                        inner=TCPTunnelRtETCPDataMessage(
+                    RelayToEdgeAgentMessage(
+                        inner=RtETCPDataMessage(
                             connection_id=connection_id,
                             data_base64=message.inner.data_base64,
                         )
@@ -223,17 +176,17 @@ class TCPTunnelNetworkRelay(NetworkRelay):
                 eprint(f"Unknown message received from access client: {message}")
 
     async def handle_custom_agent_message(
-        self, message_wrapped: TCPTunnelEdgeAgentToRelayMessage
+        self, message_wrapped: EdgeAgentToRelayMessage
     ):
         message = message_wrapped.inner
         eprint(f"Message received from agent: {message}", only_debug=True)
-        if isinstance(message, TCPTunnelEtRInitiateConnectionErrorMessage):
+        if isinstance(message, EtRInitiateConnectionErrorMessage):
             eprint(f"Received initiate connection error message from agent: {message}")
             await self.initiate_connection_answer_queue.put(message)
-        elif isinstance(message, TCPTunnelEtRInitiateConnectionOKMessage):
+        elif isinstance(message, EtRInitiateConnectionOKMessage):
             eprint(f"Received initiate connection OK message from agent: {message}")
             await self.initiate_connection_answer_queue.put(message)
-        elif isinstance(message, TCPTunnelEtRTCPDataMessage):
+        elif isinstance(message, EtRTCPDataMessage):
             eprint(f"Received TCP data message from agent: {message}", only_debug=True)
             if message.connection_id not in self.active_connections:
                 eprint(f"Unknown connection_id: {message.connection_id}")
@@ -246,7 +199,7 @@ class TCPTunnelNetworkRelay(NetworkRelay):
                     inner=RtATCPDataMessage(data_base64=message.data_base64)
                 ).model_dump_json()
             )
-        elif isinstance(message, TCPTunnelEtRConnectionResetMessage):
+        elif isinstance(message, EtRConnectionResetMessage):
             eprint(f"Received connection reset message from agent: {message}")
             if message.connection_id not in self.active_connections:
                 eprint(f"Unknown connection_id: {message.connection_id}")
@@ -265,10 +218,47 @@ class TCPTunnelNetworkRelay(NetworkRelay):
             await access_client_connection.close()
             del self.active_connections[message.connection_id]
 
+    async def handle_initiate_connection_error_message(
+        self, message: EtRInitiateConnectionErrorMessage
+    ):
+        await self.initiate_connection_answer_queue.put(message)
+
+    async def handle_initiate_connection_ok_message(
+        self, message: EtRInitiateConnectionOKMessage
+    ):
+        await self.initiate_connection_answer_queue.put(message)
+
+    async def handle_tcp_data_message(self, message: EtRTCPDataMessage):
+        if message.connection_id not in self.active_connections:
+            eprint(f"Unknown connection_id: {message.connection_id}")
+            return
+        _agent_connection, access_client_connection = self.active_connections[
+            message.connection_id
+        ]
+        await access_client_connection.send_text(
+            RelayToAccessClientMessage(
+                inner=RtATCPDataMessage(data_base64=message.data_base64)
+            ).model_dump_json()
+        )
+
+    async def handle_connection_reset_message(self, message: EtRConnectionResetMessage):
+        if message.connection_id not in self.active_connections:
+            eprint(f"Unknown connection_id: {message.connection_id}")
+            return
+        _agent_connection, access_client_connection = self.active_connections[
+            message.connection_id
+        ]
+        await access_client_connection.send_text(
+            RelayToAccessClientMessage(
+                inner=RtAErrorMessage(message=f"Connection reset: {message.message}")
+            ).model_dump_json()
+        )
+        # close the connection
+        await access_client_connection.close()
+        del self.active_connections[message.connection_id]
+
 
 def main():
-    global CREDENTIALS
-    global CREDENTIALS_FILE
     parser = argparse.ArgumentParser(description="Run the HTTP network relay server")
     parser.add_argument(
         "--host",
@@ -290,11 +280,11 @@ def main():
 
     app = FastAPI()
 
-    CREDENTIALS_FILE = args.credentials_file
-    with open(CREDENTIALS_FILE) as f:
+    credentials_file = args.credentials_file
+    with open(credentials_file) as f:
         CREDENTIALS = json.load(f)
 
-    network_relay = TCPTunnelNetworkRelay(CREDENTIALS)
+    network_relay = NetworkRelayF(CREDENTIALS)
     app.add_websocket_route("/ws_for_edge_agents", network_relay.ws_for_edge_agents)
     app.add_websocket_route(
         "/ws_for_access_clients", network_relay.ws_for_access_clients

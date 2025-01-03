@@ -6,7 +6,14 @@ from typing import Never, Type
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
 
-from .pydantic_models import EdgeAgentToRelayMessage, EtRStartMessage
+from .pydantic_models import (
+    EdgeAgentToRelayMessage,
+    EtRConnectionResetMessage,
+    EtRInitiateConnectionErrorMessage,
+    EtRInitiateConnectionOKMessage,
+    EtRStartMessage,
+    EtRTCPDataMessage,
+)
 
 debug = False
 if os.getenv("DEBUG") == "1":
@@ -20,7 +27,6 @@ def eprint(*args, only_debug=False, **kwargs):
 
 class NetworkRelay:
     CustomAgentToRelayMessage: Type[BaseModel] = Never
-    CustomRelayToAgentMessage: Type[BaseModel] = Never
 
     def __init__(self, credentials):
         self.agent_connections = []
@@ -39,7 +45,7 @@ class NetworkRelay:
         if not isinstance(start_message, EtRStartMessage):
             eprint(f"Unknown message received from agent: {start_message}")
             return
-        #  check if we know the client
+        #  check if we know the agent
         if start_message.name not in self.credentials["edge-agents"]:
             eprint(f"Unknown agent: {start_message.name}")
             # close the connection
@@ -53,12 +59,16 @@ class NetworkRelay:
             await websocket.close()
             return
 
-        # check if the client is already registered
+        # check if the agent is already registered
         if start_message.name in self.registered_agent_connections:
-            eprint(f"Agent already registered: {start_message.name}")
-            # close the connection
-            await websocket.close()
-            return
+            # check wether the other websocket is still open, if not remove it
+            if self.registered_agent_connections[start_message.name].closed:
+                del self.registered_agent_connections[start_message.name]
+            else:
+                eprint(f"Agent already registered: {start_message.name}")
+                # close the connection
+                await websocket.close()
+                return
 
         self.registered_agent_connections[start_message.name] = websocket
         eprint(f"Registered agent connection: {start_message.name}")
@@ -78,6 +88,22 @@ class NetworkRelay:
                         json_data
                     )  # pylint: disable=E1101
             eprint(f"Message received from agent: {message}", only_debug=True)
+            if isinstance(message, EtRInitiateConnectionErrorMessage):
+                eprint(
+                    f"Received initiate connection error message from agent: {message}"
+                )
+                await self.handle_initiate_connection_error_message(message)
+            elif isinstance(message, EtRInitiateConnectionOKMessage):
+                eprint(f"Received initiate connection OK message from agent: {message}")
+                await self.handle_initiate_connection_ok_message(message)
+            elif isinstance(message, EtRTCPDataMessage):
+                eprint(
+                    f"Received TCP data message from agent: {message}", only_debug=True
+                )
+                await self.handle_tcp_data_message(message)
+            elif isinstance(message, EtRConnectionResetMessage):
+                eprint(f"Received connection reset message from agent: {message}")
+                await self.handle_connection_reset_message(message)
             if self.CustomAgentToRelayMessage != Never:
                 assert isinstance(message, self.CustomAgentToRelayMessage)
                 await self.handle_custom_agent_message(message)
@@ -85,4 +111,20 @@ class NetworkRelay:
                 eprint(f"Unknown message received from agent: {message}")
 
     async def handle_custom_agent_message(self, message_wrapped: BaseModel):
+        raise NotImplementedError()
+
+    async def handle_initiate_connection_error_message(
+        self, message: EtRInitiateConnectionErrorMessage
+    ):
+        raise NotImplementedError()
+
+    async def handle_initiate_connection_ok_message(
+        self, message: EtRInitiateConnectionOKMessage
+    ):
+        raise NotImplementedError()
+
+    async def handle_tcp_data_message(self, message: EtRTCPDataMessage):
+        raise NotImplementedError()
+
+    async def handle_connection_reset_message(self, message: EtRConnectionResetMessage):
         raise NotImplementedError()
