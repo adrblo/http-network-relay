@@ -20,7 +20,6 @@ from .access_client import (
 )
 from .network_relay import NetworkRelay
 from .pydantic_models import (
-    EdgeAgentToRelayMessage,
     EtRConnectionResetMessage,
     EtRInitiateConnectionErrorMessage,
     EtRInitiateConnectionOKMessage,
@@ -174,49 +173,6 @@ class NetworkRelayForAccessClients(NetworkRelay):
                 )
             else:
                 eprint(f"Unknown message received from access client: {message}")
-
-    async def handle_custom_agent_message(
-        self, message_wrapped: EdgeAgentToRelayMessage
-    ):
-        message = message_wrapped.inner
-        eprint(f"Message received from agent: {message}", only_debug=True)
-        if isinstance(message, EtRInitiateConnectionErrorMessage):
-            eprint(f"Received initiate connection error message from agent: {message}")
-            await self.initiate_connection_answer_queue.put(message)
-        elif isinstance(message, EtRInitiateConnectionOKMessage):
-            eprint(f"Received initiate connection OK message from agent: {message}")
-            await self.initiate_connection_answer_queue.put(message)
-        elif isinstance(message, EtRTCPDataMessage):
-            eprint(f"Received TCP data message from agent: {message}", only_debug=True)
-            if message.connection_id not in self.active_connections:
-                eprint(f"Unknown connection_id: {message.connection_id}")
-                return
-            _agent_connection, access_client_connection = self.active_connections[
-                message.connection_id
-            ]
-            await access_client_connection.send_text(
-                RelayToAccessClientMessage(
-                    inner=RtATCPDataMessage(data_base64=message.data_base64)
-                ).model_dump_json()
-            )
-        elif isinstance(message, EtRConnectionResetMessage):
-            eprint(f"Received connection reset message from agent: {message}")
-            if message.connection_id not in self.active_connections:
-                eprint(f"Unknown connection_id: {message.connection_id}")
-                return
-            _agent_connection, access_client_connection = self.active_connections[
-                message.connection_id
-            ]
-            await access_client_connection.send_text(
-                RelayToAccessClientMessage(
-                    inner=RtAErrorMessage(
-                        message=f"Connection reset: {message.message}"
-                    )
-                ).model_dump_json()
-            )
-            # close the connection
-            await access_client_connection.close()
-            del self.active_connections[message.connection_id]
 
     async def handle_initiate_connection_error_message(
         self, message: EtRInitiateConnectionErrorMessage
