@@ -27,5 +27,5 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
 edge-agent = 'http_network_relay.edge_agent:main'
-network-relay = 'http_network_relay.network_relay:main'
+network-relay = 'http_network_relay.network_relay_tcp_tunnel:main'
 access-client = 'http_network_relay.access_client:main'

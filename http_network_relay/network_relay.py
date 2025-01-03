@@ -1,36 +1,12 @@
 #!/usr/bin/env python
-import argparse
-import asyncio
-import json
 import os
 import sys
-import uuid
+from typing import Never, Type
 
-import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, ValidationError
 
-from .pydantic_models import (
-    AccessClientToRelayMessage,
-    AtRStartMessage,
-    AtRTCPDataMessage,
-    EdgeAgentToRelayMessage,
-    EtRConnectionResetMessage,
-    EtRInitiateConnectionErrorMessage,
-    EtRInitiateConnectionOKMessage,
-    EtRStartMessage,
-    EtRTCPDataMessage,
-    RelayToAccessClientMessage,
-    RelayToEdgeAgentMessage,
-    RtAErrorMessage,
-    RtAStartOKMessage,
-    RtATCPDataMessage,
-    RtEInitiateConnectionMessage,
-    RtETCPDataMessage,
-)
-
-CREDENTIALS_FILE = os.getenv("HTTP_NETWORK_RELAY_CREDENTIALS_FILE", "credentials.json")
-CREDENTIALS = None
-
+from .pydantic_models import EdgeAgentToRelayMessage, EtRStartMessage
 
 debug = False
 if os.getenv("DEBUG") == "1":
@@ -43,16 +19,14 @@ def eprint(*args, only_debug=False, **kwargs):
 
 
 class NetworkRelay:
-    def __init__(self):
+    CustomAgentToRelayMessage: Type[BaseModel] = Never
+    CustomRelayToAgentMessage: Type[BaseModel] = Never
+
+    def __init__(self, credentials):
         self.agent_connections = []
         self.registered_agent_connections = {}  # name -> connection
-        self.access_client_connections = []
 
-        self.initiate_connection_answer_queue = asyncio.Queue()
-
-        self.active_connections = (
-            {}
-        )  # connection_id -> (agent_connection, access_client_connection)
+        self.credentials = credentials
 
     async def ws_for_edge_agents(self, websocket: WebSocket):
         await websocket.accept()
@@ -61,262 +35,54 @@ class NetworkRelay:
         start_message = EdgeAgentToRelayMessage.model_validate_json(
             start_message_json_data
         ).inner
-        eprint(f"Message received from client: {start_message}")
+        eprint(f"Message received from agent: {start_message}")
         if not isinstance(start_message, EtRStartMessage):
-            eprint(f"Unknown message received from client: {start_message}")
+            eprint(f"Unknown message received from agent: {start_message}")
             return
         #  check if we know the client
-        if start_message.name not in CREDENTIALS["edge-agents"]:
-            eprint(f"Unknown client: {start_message.name}")
+        if start_message.name not in self.credentials["edge-agents"]:
+            eprint(f"Unknown agent: {start_message.name}")
             # close the connection
             await websocket.close()
             return
 
         # check if the secret is correct
-        if CREDENTIALS["edge-agents"][start_message.name] != start_message.secret:
-            eprint(f"Invalid secret for client: {start_message.name}")
+        if self.credentials["edge-agents"][start_message.name] != start_message.secret:
+            eprint(f"Invalid secret for agent: {start_message.name}")
             # close the connection
             await websocket.close()
             return
 
         # check if the client is already registered
         if start_message.name in self.registered_agent_connections:
-            eprint(f"Client already registered: {start_message.name}")
+            eprint(f"Agent already registered: {start_message.name}")
             # close the connection
             await websocket.close()
             return
 
         self.registered_agent_connections[start_message.name] = websocket
-        eprint(f"Registered client connection: {start_message.name}")
+        eprint(f"Registered agent connection: {start_message.name}")
 
         while True:
             try:
                 json_data = await websocket.receive_text()
             except WebSocketDisconnect:
-                eprint(f"Client disconnected: {start_message.name}")
+                eprint(f"Agent disconnected: {start_message.name}")
                 del self.registered_agent_connections[start_message.name]
                 break
-            message = EdgeAgentToRelayMessage.model_validate_json(json_data)
-            eprint(f"Message received from client: {message}", only_debug=True)
-            if isinstance(message.inner, EtRInitiateConnectionErrorMessage):
-                eprint(
-                    f"Received initiate connection error message from client: {message}"
-                )
-                await self.initiate_connection_answer_queue.put(message.inner)
-            elif isinstance(message.inner, EtRInitiateConnectionOKMessage):
-                eprint(
-                    f"Received initiate connection OK message from client: {message}"
-                )
-                await self.initiate_connection_answer_queue.put(message.inner)
-            elif isinstance(message.inner, EtRTCPDataMessage):
-                eprint(
-                    f"Received TCP data message from client: {message}", only_debug=True
-                )
-                tcp_data_message = message.inner
-                if tcp_data_message.connection_id not in self.active_connections:
-                    eprint(f"Unknown connection_id: {tcp_data_message.connection_id}")
-                    continue
-                _agent_connection, access_client_connection = self.active_connections[
-                    tcp_data_message.connection_id
-                ]
-                await access_client_connection.send_text(
-                    RelayToAccessClientMessage(
-                        inner=RtATCPDataMessage(
-                            data_base64=tcp_data_message.data_base64,
-                        )
-                    ).model_dump_json()
-                )
-            elif isinstance(message.inner, EtRConnectionResetMessage):
-                eprint(f"Received connection reset message from client: {message}")
-                connection_reset_message = message.inner
-                if (
-                    connection_reset_message.connection_id
-                    not in self.active_connections
-                ):
-                    eprint(
-                        f"Unknown connection_id: {connection_reset_message.connection_id}"
-                    )
-                    continue
-                agent_connection, access_client_connection = self.active_connections[
-                    connection_reset_message.connection_id
-                ]
-                await access_client_connection.send_text(
-                    RelayToAccessClientMessage(
-                        inner=RtAErrorMessage(
-                            message=connection_reset_message.message,
-                        )
-                    ).model_dump_json()
-                )
-                del self.active_connections[connection_reset_message.connection_id]
-                # close the connection
-                await access_client_connection.close()
-            else:
-                eprint(f"Unknown message received from client: {message}")
-
-    async def ws_for_access_clients(self, websocket: WebSocket):
-        await websocket.accept()
-        self.access_client_connections.append(websocket)
-        json_data = await websocket.receive_text()
-        message = AccessClientToRelayMessage.model_validate_json(json_data)
-        eprint(f"Message received from access client: {message}")
-        if not isinstance(message.inner, AtRStartMessage):
-            eprint(f"Unknown message received from access client: {message}")
-            return
-        start_message = message.inner
-        # check if credentials are correct
-        if start_message.secret not in CREDENTIALS["access-client-secrets"]:
-            eprint(f"Invalid access client secret: {start_message.secret}")
-            # send a message back and kill the connection
-            await websocket.send_text(
-                RelayToAccessClientMessage(
-                    inner=RtAErrorMessage(message="Invalid access client secret")
-                ).model_dump_json()
-            )
-        # check if the client is registered
-        if not start_message.connection_target in self.registered_agent_connections:
-            eprint(f"Agent not registered: {start_message.connection_target}")
-            # send a message back and kill the connection
-            await websocket.send_text(
-                RelayToAccessClientMessage(
-                    inner=RtAErrorMessage(message="Agent not registered")
-                ).model_dump_json()
-            )
-            await websocket.close()
-            return
-        agent_connection = self.registered_agent_connections[
-            start_message.connection_target
-        ]
-        await self.start_connection(
-            agent_connection=agent_connection,
-            access_client_connection=websocket,
-            connection_target=start_message.connection_target,
-            target_ip=start_message.target_ip,
-            target_port=start_message.target_port,
-            protocol=start_message.protocol,
-        )
-
-    async def start_connection(
-        self,
-        agent_connection,
-        access_client_connection,
-        connection_target,
-        target_ip,
-        target_port,
-        protocol,
-    ):
-        connection_id = str(uuid.uuid4())
-        eprint(
-            f"Starting connection to {target_ip}:{target_port} for {connection_target} using {protocol} with connection_id {connection_id}"
-        )
-        self.active_connections[connection_id] = (
-            agent_connection,
-            access_client_connection,
-        )
-        await agent_connection.send_text(
-            RelayToEdgeAgentMessage(
-                inner=RtEInitiateConnectionMessage(
-                    target_ip=target_ip,
-                    target_port=target_port,
-                    protocol=protocol,
-                    connection_id=connection_id,
-                )
-            ).model_dump_json()
-        )
-        # wait for the client to respond
-        message = await self.initiate_connection_answer_queue.get()
-        if not isinstance(
-            message, (EtRInitiateConnectionErrorMessage, EtRInitiateConnectionOKMessage)
-        ):
-            raise ValueError(f"Unexpected message: {message}")
-        if message.connection_id != connection_id:
-            raise ValueError(f"Unexpected connection_id: {message.connection_id}")
-        if isinstance(message, EtRInitiateConnectionErrorMessage):
-            eprint(f"Received error message from client: {message}")
-            await access_client_connection.send_text(
-                RelayToAccessClientMessage(
-                    inner=RtAErrorMessage(
-                        message=f"Initiating connection failed: {message.message}"
-                    )
-                ).model_dump_json()
-            )
-            # close the connection
-            await access_client_connection.close()
-            del self.active_connections[connection_id]
-            return
-        if isinstance(message, EtRInitiateConnectionOKMessage):
-            eprint(f"Received OK message from client: {message}")
-        await access_client_connection.send_text(
-            RelayToAccessClientMessage(inner=RtAStartOKMessage()).model_dump_json()
-        )
-
-        while True:
             try:
-                json_data = await access_client_connection.receive_text()
-            except WebSocketDisconnect:
-                eprint(f"access client disconnected: {connection_id}")
-                if connection_id in self.active_connections:
-                    del self.active_connections[connection_id]
-                break
-            message = AccessClientToRelayMessage.model_validate_json(json_data)
-            if isinstance(message.inner, AtRTCPDataMessage):
-                eprint(
-                    f"Received TCP data message from access client: {message}",
-                    only_debug=True,
-                )
-                await agent_connection.send_text(
-                    RelayToEdgeAgentMessage(
-                        inner=RtETCPDataMessage(
-                            connection_id=connection_id,
-                            data_base64=message.inner.data_base64,
-                        )
-                    ).model_dump_json()
-                )
+                message = EdgeAgentToRelayMessage.model_validate_json(json_data).inner
+            except ValidationError:
+                if self.CustomAgentToRelayMessage != Never:
+                    message = self.CustomAgentToRelayMessage.model_validate_json(
+                        json_data
+                    )  # pylint: disable=E1101
+            eprint(f"Message received from agent: {message}", only_debug=True)
+            if self.CustomAgentToRelayMessage != Never:
+                assert isinstance(message, self.CustomAgentToRelayMessage)
+                await self.handle_custom_agent_message(message)
             else:
-                eprint(f"Unknown message received from access client: {message}")
+                eprint(f"Unknown message received from agent: {message}")
 
-
-def main():
-    global CREDENTIALS
-    global CREDENTIALS_FILE
-    parser = argparse.ArgumentParser(description="Run the HTTP network relay server")
-    parser.add_argument(
-        "--host",
-        help="The host to bind to",
-        default=os.getenv("HTTP_NETWORK_RELAY_SERVER_HOST", "127.0.0.1"),
-    )
-    parser.add_argument(
-        "--port",
-        help="The port to bind to",
-        type=int,
-        default=int(os.getenv("HTTP_NETWORK_RELAY_SERVER_PORT", "8000")),
-    )
-    parser.add_argument(
-        "--credentials-file",
-        help="The credentials file",
-        default=CREDENTIALS_FILE,
-    )
-    args = parser.parse_args()
-
-    app = FastAPI()
-
-    network_relay = NetworkRelay()
-
-    app.add_websocket_route("/ws_for_edge_agents", network_relay.ws_for_edge_agents)
-    app.add_websocket_route(
-        "/ws_for_access_clients", network_relay.ws_for_access_clients
-    )
-    CREDENTIALS_FILE = args.credentials_file
-
-    with open(CREDENTIALS_FILE) as f:
-        CREDENTIALS = json.load(f)
-
-    uvicorn.run(
-        app,
-        host=args.host,
-        port=args.port,
-        log_level="info",
-    )
-
-
-if __name__ == "__main__":
-    main()
+    async def handle_custom_agent_message(self, message_wrapped: BaseModel):
+        raise NotImplementedError()

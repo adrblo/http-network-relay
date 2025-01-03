@@ -10,17 +10,17 @@ import time
 import websockets
 from websockets.asyncio.client import ClientConnection, connect
 
-from .pydantic_models import (
-    EdgeAgentToRelayMessage,
-    EtRConnectionResetMessage,
-    EtRInitiateConnectionErrorMessage,
-    EtRInitiateConnectionOKMessage,
-    EtRStartMessage,
-    EtRTCPDataMessage,
-    RelayToEdgeAgentMessage,
-    RtEInitiateConnectionMessage,
-    RtETCPDataMessage,
+from .network_relay_tcp_tunnel import (
+    TCPTunnelEdgeAgentToRelayMessage,
+    TCPTunnelEtRConnectionResetMessage,
+    TCPTunnelEtRInitiateConnectionErrorMessage,
+    TCPTunnelEtRInitiateConnectionOKMessage,
+    TCPTunnelEtRTCPDataMessage,
+    TCPTunnelRelayToEdgeAgentMessage,
+    TCPTunnelRtEInitiateConnectionMessage,
+    TCPTunnelRtETCPDataMessage,
 )
+from .pydantic_models import EdgeAgentToRelayMessage, EtRStartMessage
 
 debug = False
 if os.getenv("DEBUG") == "1":
@@ -104,9 +104,9 @@ async def connect_to_server(args):
             except websockets.exceptions.ConnectionClosedOK as e:
                 eprint(f"Connection closed OK: {e}")
                 break
-            message = RelayToEdgeAgentMessage.model_validate_json(json_data)
+            message = TCPTunnelRelayToEdgeAgentMessage.model_validate_json(json_data)
             eprint(f"Received message: {message}", only_debug=True)
-            if isinstance(message.inner, RtEInitiateConnectionMessage):
+            if isinstance(message.inner, TCPTunnelRtEInitiateConnectionMessage):
                 eprint(f"Received initiate connection message: {message}")
                 try:
                     await initiate_connection(message.inner, websocket)
@@ -114,14 +114,14 @@ async def connect_to_server(args):
                     eprint(f"Error while initiating connection: {e}")
                     # send an error message back
                     await websocket.send(
-                        EdgeAgentToRelayMessage(
-                            inner=EtRInitiateConnectionErrorMessage(
+                        TCPTunnelEdgeAgentToRelayMessage(
+                            inner=TCPTunnelEtRInitiateConnectionErrorMessage(
                                 message=str(e),
                                 connection_id=message.inner.connection_id,
                             )
                         ).model_dump_json()
                     )
-            elif isinstance(message.inner, RtETCPDataMessage):
+            elif isinstance(message.inner, TCPTunnelRtETCPDataMessage):
                 tcp_data_message = message.inner
                 eprint(
                     f"Received TCP data message: {tcp_data_message}", only_debug=True
@@ -139,8 +139,8 @@ async def connect_to_server(args):
                     writer.close()
                     del active_connections[tcp_data_message.connection_id]
                     await websocket.send(
-                        EdgeAgentToRelayMessage(
-                            inner=EtRConnectionResetMessage(
+                        TCPTunnelEdgeAgentToRelayMessage(
+                            inner=TCPTunnelEtRConnectionResetMessage(
                                 message="Connection reset while writing data",
                                 connection_id=tcp_data_message.connection_id,
                             )
@@ -151,7 +151,7 @@ async def connect_to_server(args):
 
 
 async def initiate_connection(
-    message: RtEInitiateConnectionMessage, server_websocket: ClientConnection
+    message: TCPTunnelRtEInitiateConnectionMessage, server_websocket: ClientConnection
 ):
     eprint(
         f"Initiating connection to {message.target_ip}:{message.target_port} using {message.protocol}"
@@ -166,8 +166,10 @@ async def initiate_connection(
     eprint(f"Connected to {message.target_ip}:{message.target_port}")
     # send OK message back
     await server_websocket.send(
-        EdgeAgentToRelayMessage(
-            inner=EtRInitiateConnectionOKMessage(connection_id=message.connection_id)
+        TCPTunnelEdgeAgentToRelayMessage(
+            inner=TCPTunnelEtRInitiateConnectionOKMessage(
+                connection_id=message.connection_id
+            )
         ).model_dump_json()
     )
 
@@ -178,8 +180,8 @@ async def initiate_connection(
             if not data:
                 break
             await server_websocket.send(
-                EdgeAgentToRelayMessage(
-                    inner=EtRTCPDataMessage(
+                TCPTunnelEdgeAgentToRelayMessage(
+                    inner=TCPTunnelEtRTCPDataMessage(
                         connection_id=message.connection_id,
                         data_base64=base64.b64encode(data).decode("utf-8"),
                     )
