@@ -104,8 +104,9 @@ class NetworkRelay:
             elif isinstance(message, EtRConnectionResetMessage):
                 eprint(f"Received connection reset message from agent: {message}")
                 await self.handle_connection_reset_message(message)
-            if self.CustomAgentToRelayMessage != Never:
-                assert isinstance(message, self.CustomAgentToRelayMessage)
+            if self.CustomAgentToRelayMessage != Never and isinstance(
+                message, self.CustomAgentToRelayMessage
+            ):
                 await self.handle_custom_agent_message(message)
             else:
                 eprint(f"Unknown message received from agent: {message}")
