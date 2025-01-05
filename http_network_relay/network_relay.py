@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import os
 import sys
-from typing import Never, Type
+from typing import Type
 
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
@@ -26,7 +26,7 @@ def eprint(*args, only_debug=False, **kwargs):
 
 
 class NetworkRelay:
-    CustomAgentToRelayMessage: Type[BaseModel] = Never
+    CustomAgentToRelayMessage: Type[BaseModel] = None
 
     def __init__(self, credentials):
         self.agent_connections = []
@@ -82,11 +82,12 @@ class NetworkRelay:
                 break
             try:
                 message = EdgeAgentToRelayMessage.model_validate_json(json_data).inner
-            except ValidationError:
-                if self.CustomAgentToRelayMessage != Never:
-                    message = self.CustomAgentToRelayMessage.model_validate_json(
-                        json_data
-                    )  # pylint: disable=E1101
+            except ValidationError as e:
+                if self.CustomAgentToRelayMessage is None:
+                    raise e
+                message = self.CustomAgentToRelayMessage.model_validate_json(
+                    json_data
+                )  # pylint: disable=E1101
             eprint(f"Message received from agent: {message}", only_debug=True)
             if isinstance(message, EtRInitiateConnectionErrorMessage):
                 eprint(
@@ -104,7 +105,7 @@ class NetworkRelay:
             elif isinstance(message, EtRConnectionResetMessage):
                 eprint(f"Received connection reset message from agent: {message}")
                 await self.handle_connection_reset_message(message)
-            if self.CustomAgentToRelayMessage != Never and isinstance(
+            elif self.CustomAgentToRelayMessage is not None and isinstance(
                 message, self.CustomAgentToRelayMessage
             ):
                 await self.handle_custom_agent_message(message)

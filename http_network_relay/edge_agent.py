@@ -6,8 +6,10 @@ import random
 import socket
 import sys
 import time
+from typing import Type
 
 import websockets
+from pydantic import BaseModel, ValidationError
 from websockets.asyncio.client import ClientConnection, connect
 
 from .pydantic_models import (
@@ -33,6 +35,8 @@ def eprint(*args, only_debug=False, **kwargs):
 
 
 class EdgeAgent:
+    CustomAgentToRelayMessage: Type[BaseModel] = None
+
     def __init__(self, relay_url, name, secret):
         self.relay_url = relay_url
         self.name = name
@@ -78,12 +82,22 @@ class EdgeAgent:
                 except websockets.exceptions.ConnectionClosedOK as e:
                     eprint(f"Connection closed OK: {e}")
                     break
-                message = RelayToEdgeAgentMessage.model_validate_json(json_data)
+                try:
+                    message = RelayToEdgeAgentMessage.model_validate_json(
+                        json_data
+                    ).inner
+                except ValidationError as e:
+                    if self.CustomAgentToRelayMessage is None:
+                        raise e
+                    message = self.CustomAgentToRelayMessage.model_validate_json(
+                        json_data
+                    )  # pylint: disable=E1101
+
                 eprint(f"Received message: {message}", only_debug=True)
-                if isinstance(message.inner, RtEInitiateConnectionMessage):
+                if isinstance(message, RtEInitiateConnectionMessage):
                     eprint(f"Received initiate connection message: {message}")
                     try:
-                        await self.initiate_connection(message.inner, websocket)
+                        await self.initiate_connection(message, websocket)
                     except Exception as e:
                         eprint(f"Error while initiating connection: {e}")
                         # send an error message back
@@ -91,12 +105,12 @@ class EdgeAgent:
                             EdgeAgentToRelayMessage(
                                 inner=EtRInitiateConnectionErrorMessage(
                                     message=str(e),
-                                    connection_id=message.inner.connection_id,
+                                    connection_id=message.connection_id,
                                 )
                             ).model_dump_json()
                         )
-                elif isinstance(message.inner, RtETCPDataMessage):
-                    tcp_data_message = message.inner
+                elif isinstance(message, RtETCPDataMessage):
+                    tcp_data_message = message
                     eprint(
                         f"Received TCP data message: {tcp_data_message}",
                         only_debug=True,
@@ -125,6 +139,10 @@ class EdgeAgent:
                                 )
                             ).model_dump_json()
                         )
+                elif self.CustomAgentToRelayMessage is not None and isinstance(
+                    message, self.CustomAgentToRelayMessage
+                ):
+                    await self.handle_custom_relay_message(message)
                 else:
                     eprint(f"Unknown message received: {message}")
 
@@ -167,6 +185,9 @@ class EdgeAgent:
                 )
 
         asyncio.create_task(read_from_tcp_and_send())
+
+    async def handle_custom_relay_message(self, message_wrapped: BaseModel):
+        raise NotImplementedError()
 
 
 def main():
