@@ -205,14 +205,14 @@ def main():
         "--name",
         help="The edge-agents name",
         default=os.getenv(
-            "HTTP_NETWORK_RELAY_CLIENT_NAME",
+            "HTTP_NETWORK_RELAY_NAME",
             f"unnamed-fqdn-{socket.getfqdn()}-edge-agent-{random.randbytes(4).hex()}",
         ),
     )
     parser.add_argument(
         "--secret",
         help="The secret used to authenticate with the relay",
-        default=os.getenv("HTTP_NETWORK_RELAY_CLIENT_SECRET", None),
+        default=os.getenv("HTTP_NETWORK_RELAY_SECRET", None),
     )
     args = parser.parse_args()
 
